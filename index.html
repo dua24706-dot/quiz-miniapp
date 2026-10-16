@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Quiz Mini App</title>
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-color: var(--tg-theme-bg-color, #f4f6f9);
+            --text-color: var(--tg-theme-text-color, #222);
+            --card-bg: var(--tg-theme-secondary-bg-color, #ffffff);
+            --button-color: var(--tg-theme-button-color, #0088cc);
+            --button-text: var(--tg-theme-button-text-color, #ffffff);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 16px;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .user-info {
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .timer {
+            background: #ff4d4d;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            margin-bottom: 20px;
+        }
+
+        .question-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            line-height: 1.4;
+        }
+
+        .options {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .opt-btn {
+            background: var(--bg-color);
+            border: 2px solid transparent;
+            color: var(--text-color);
+            padding: 14px;
+            border-radius: 12px;
+            font-size: 15px;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .opt-btn:active, .opt-btn.selected {
+            border-color: var(--button-color);
+            background: rgba(0, 136, 204, 0.1);
+        }
+
+        .opt-btn.correct {
+            background: #2ecc71 !important;
+            color: white !important;
+        }
+
+        .opt-btn.wrong {
+            background: #e74c3c !important;
+            color: white !important;
+        }
+
+        .action-btn {
+            width: 100%;
+            background: var(--button-color);
+            color: var(--button-text);
+            border: none;
+            padding: 16px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <div class="user-info" id="user-name">👤 Foydalanuvchi</div>
+        <div class="timer" id="timer">⏳ 30s</div>
+    </div>
+
+    <!-- Start / Welcome Screen -->
+    <div id="start-screen" class="card">
+        <h2>📝 Testga Xush kelibsiz!</h2>
+        <p>Tayyor bo'lsangiz "Boshlash" tugmasini bosing.</p>
+        <button class="action-btn" onclick="startQuiz()">Boshlash</button>
+    </div>
+
+    <!-- Quiz Screen -->
+    <div id="quiz-screen" class="card hidden">
+        <div style="font-size: 12px; opacity: 0.7; margin-bottom: 8px;" id="q-progress">Savol 1/10</div>
+        <div class="question-title" id="q-text">Savol yuklanmoqda...</div>
+        <div class="options" id="options-container"></div>
+        <button class="action-btn hidden" id="next-btn" onclick="nextQuestion()">Keyingisi ➡️</button>
+    </div>
+
+    <!-- Finish Screen -->
+    <div id="finish-screen" class="card hidden" style="text-align: center;">
+        <h2>🎉 Test Yakunlandi!</h2>
+        <p id="result-text" style="font-size: 18px; font-weight: bold;"></p>
+        <button class="action-btn" onclick="closeApp()">Yopish</button>
+    </div>
+</div>
+
+<script>
+    const tg = window.Telegram.WebApp;
+    tg.expand(); // Mini appni to'liq ekranga yoyish
+
+    // Telegram foydalanuvchi ismini chiqarish
+    const user = tg.initDataUnsafe?.user;
+    if (user) {
+        document.getElementById("user-name").innerText = `👤 ${user.first_name || 'Ishtirokchi'}`;
+    }
+
+    // Namunaviy test savollari (Botdan server orqali dinamik yuklash ham mumkin)
+    const questions = [
+        { q: "O'zbekiston poytaxti qaysi?", opts: ["Samarqand", "Toshkent", "Buxoro", "Xiva"], correct: 1 },
+        { q: "Python tili qaysi yilda yaratilgan?", opts: ["1991", "1995", "2000", "1985"], correct: 0 },
+        { q: "Telegram asoschisi kim?", opts: ["Mark Zuckerberg", "Pavel Durov", "Bill Gates", "Elon Musk"], correct: 1 }
+    ];
+
+    let currentIndex = 0;
+    let score = 0;
+    let selectedOption = null;
+    let timerInterval = null;
+    let timeLeft = 30;
+
+    function startQuiz() {
+        document.getElementById("start-screen").classList.add("hidden");
+        document.getElementById("quiz-screen").classList.remove("hidden");
+        loadQuestion();
+    }
+
+    function loadQuestion() {
+        clearInterval(timerInterval);
+        timeLeft = 30;
+        updateTimerDisplay();
+        
+        timerInterval = setInterval(() => {
+            timeLeft--;
+            updateTimerDisplay();
+            if (timeLeft <= 0) {
+                clearInterval(timerInterval);
+                nextQuestion();
+            }
+        }, 1000);
+
+        const q = questions[currentIndex];
+        document.getElementById("q-progress").innerText = `Savol ${currentIndex + 1}/${questions.length}`;
+        document.getElementById("q-text").innerText = q.q;
+        
+        const container = document.getElementById("options-container");
+        container.innerHTML = "";
+        selectedOption = null;
+        document.getElementById("next-btn").classList.add("hidden");
+
+        q.opts.forEach((opt, idx) => {
+            const btn = document.createElement("button");
+            btn.className = "opt-btn";
+            btn.innerText = opt;
+            btn.onclick = () => selectOption(idx, btn);
+            container.appendChild(btn);
+        });
+    }
+
+    function updateTimerDisplay() {
+        document.getElementById("timer").innerText = `⏳ ${timeLeft}s`;
+    }
+
+    function selectOption(idx, element) {
+        if (selectedOption !== null) return; // faqat bir marta tanlash mumkin
+        selectedOption = idx;
+
+        const q = questions[currentIndex];
+        const buttons = document.querySelectorAll(".opt-btn");
+
+        if (idx === q.correct) {
+            element.classList.add("correct");
+            score++;
+        } else {
+            element.classList.add("wrong");
+            buttons[q.correct].classList.add("correct");
+        }
+
+        document.getElementById("next-btn").classList.remove("hidden");
+    }
+
+    function nextQuestion() {
+        currentIndex++;
+        if (currentIndex < questions.length) {
+            loadQuestion();
+        } else {
+            finishQuiz();
+        }
+    }
+
+    function finishQuiz() {
+        clearInterval(timerInterval);
+        document.getElementById("quiz-screen").classList.add("hidden");
+        document.getElementById("finish-screen").classList.remove("hidden");
+        document.getElementById("result-text").innerText = `Siz ${questions.length} ta savoldan ${score} tasiga to'g'ri javob berdingiz!`;
+        
+        // Natijani Telegram botga qaytarib yuborish
+        tg.sendData(JSON.stringify({
+            score: score,
+            total: questions.length
+        }));
+    }
+
+    function closeApp() {
+        tg.close();
+    }
+</script>
+</body>
+</html>
